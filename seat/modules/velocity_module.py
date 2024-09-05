@@ -156,7 +156,7 @@ def check_grid_define_vars(dataset: Dataset) -> tuple[str, str, str, str, str]:
     return gridtype, xvar, yvar, uvar, vvar
 
 
-
+# Single File Processing
 def validate_and_list_files(fpath_nodev: str, fpath_dev: str) -> Tuple[List[str], List[str]]:
     """
     Validate the directories and list NetCDF files in them.
@@ -222,23 +222,118 @@ def process_single_file_case(
     mag_dev : np.ndarray
         Magnitude data array for 'with device' runs.
     """
-    with Dataset(
-        os.path.join(fpath_dev, files_dev[0])
-    ) as file_dev_present, Dataset(
-        os.path.join(fpath_nodev, files_nodev[0])
-    ) as file_dev_notpresent:
-        gridtype, xvar, yvar, uvar, vvar = check_grid_define_vars(file_dev_present)
-        xcor = file_dev_present.variables[xvar][:].data
-        ycor = file_dev_present.variables[yvar][:].data
-        u = file_dev_present.variables[uvar][:].data
-        v = file_dev_present.variables[vvar][:].data
-        mag_dev = np.sqrt(u**2 + v**2)
+    # Helper function to read variables and compute magnitudes
+    def read_and_compute_magnitude(
+            file_path: str,
+            file_name: str,
+            xvar: str,
+            yvar: str,
+            uvar: str,
+            vvar: str):
+        with Dataset(os.path.join(file_path, file_name)) as dataset:
+            xcor = dataset.variables[xvar][:].data
+            ycor = dataset.variables[yvar][:].data
+            u = dataset.variables[uvar][:].data
+            v = dataset.variables[vvar][:].data
+            magnitude = np.sqrt(u**2 + v**2)
+        return xcor, ycor, magnitude
 
-        u = file_dev_notpresent.variables[uvar][:].data
-        v = file_dev_notpresent.variables[vvar][:].data
-        mag_nodev = np.sqrt(u**2 + v**2)
+    # Read grid definitions and variables
+    with Dataset(os.path.join(fpath_dev, files_dev[0])) as file_dev_present:
+        gridtype, xvar, yvar, uvar, vvar = check_grid_define_vars(file_dev_present)
+
+    # Read and compute magnitudes for 'with device' and 'no device' runs
+    _, _, mag_dev = read_and_compute_magnitude(fpath_dev, files_dev[0], xvar, yvar, uvar, vvar)
+    xcor, ycor, mag_nodev = read_and_compute_magnitude(
+        fpath_nodev,
+        files_nodev[0],
+        xvar,
+        yvar,
+        uvar,
+        vvar
+        )
 
     return gridtype, xcor, ycor, mag_nodev, mag_dev
+
+
+
+# Multiple File Processing
+def prepare_run_data(files_nodev: List[str], files_dev: List[str]) -> pd.DataFrame:
+    """
+    Prepare and sort run data based on run numbers extracted from filenames.
+
+    Parameters
+    ----------
+    files_nodev : list
+        List of filenames for the 'no device' runs.
+    files_dev : list
+        List of filenames for the 'with device' runs.
+
+    Returns
+    -------
+    data_frame : pd.DataFrame
+        DataFrame containing sorted file and run information.
+    """
+    # Extract run numbers from file names
+    run_num_nodev = np.array([int(file.split(".")[0].split("_")[-2]) for file in files_nodev])
+    run_num_dev = np.array([int(file.split(".")[0].split("_")[-2]) for file in files_dev])
+
+    # Adjust file order if necessary
+    if np.any(run_num_nodev != run_num_dev):
+        files_dev = [files_dev[np.flatnonzero(run_num_dev == ri)[0]] for ri in run_num_nodev]
+
+    # Create DataFrame with sorted runs
+    return pd.DataFrame({
+        "files_nodev": files_nodev,
+        "run_num_nodev": run_num_nodev,
+        "files_dev": files_dev,
+        "run_num_dev": run_num_dev,
+    }).sort_values(by="run_num_dev")
+
+def compute_all_magnitudes(
+        data_frame: pd.DataFrame,
+        fpath_nodev: str,
+        fpath_dev: str,
+        uvar: str,
+        vvar: str) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Compute magnitudes for 'no device' and 'with device' runs.
+
+    Parameters
+    ----------
+    data_frame : pd.DataFrame
+        DataFrame containing file and run information.
+    fpath_nodev : str
+        Directory path to the baseline/no device model run NetCDF files.
+    fpath_dev : str
+        Directory path to the with device model run NetCDF files.
+    uvar : str
+        U-component variable name in NetCDF files.
+    vvar : str
+        V-component variable name in NetCDF files.
+
+    Returns
+    -------
+    mag_nodev : np.ndarray
+        Magnitude data array for 'no device' runs.
+    mag_dev : np.ndarray
+        Magnitude data array for 'with device' runs.
+    """
+    def compute_magnitudes(file_path: str, file_name: str) -> np.ndarray:
+        with Dataset(os.path.join(file_path, file_name)) as dataset:
+            u = dataset.variables[uvar][:].data
+            v = dataset.variables[vvar][:].data
+            return np.sqrt(u**2 + v**2)
+
+    # Compute magnitudes for each run
+    mag_nodev = np.array(
+        [compute_magnitudes(fpath_nodev, row.files_nodev) for _, row in data_frame.iterrows()]
+        )
+    mag_dev = np.array(
+        [compute_magnitudes(fpath_dev, row.files_dev) for _, row in data_frame.iterrows()]
+        )
+
+    return mag_nodev, mag_dev
 
 def process_multiple_files_case(
         files_nodev: List[str],
@@ -280,58 +375,27 @@ def process_multiple_files_case(
     data_frame : pd.DataFrame
         DataFrame containing file and run information.
     """
-    run_num_nodev = np.array([int(file.split(".")[0].split("_")[-2]) for file in files_nodev])
-    run_num_dev = np.array([int(file.split(".")[0].split("_")[-2]) for file in files_dev])
+    # Prepare run data and get sorted DataFrame
+    data_frame = prepare_run_data(files_nodev, files_dev)
 
-    # Ensure the run order for nodev matches dev files
-    if np.any(run_num_nodev != run_num_dev):
-        adjust_dev_order = [np.flatnonzero(run_num_dev == ri)[0] for ri in run_num_nodev]
-        files_dev = [files_dev[i] for i in adjust_dev_order]
+    # Read the first file to define grid type and coordinates
+    with Dataset(os.path.join(fpath_dev, data_frame['files_dev'].iloc[0])) as dataset:
+        gridtype, xvar, yvar, uvar, vvar = check_grid_define_vars(dataset)
+        xcor = dataset.variables[xvar][:].data
+        ycor = dataset.variables[yvar][:].data
 
-    data_frame = pd.DataFrame({
-        "files_nodev": files_nodev,
-        "run_num_nodev": run_num_nodev,
-        "files_dev": files_dev,
-        "run_num_dev": run_num_dev,
-    }).sort_values(by="run_num_dev")
-
-    # Initialize variables to None
-    mag_nodev = None
-    mag_dev = None
-    xcor = None
-    ycor = None
-
-    first_run = True
-    ir = 0
-    for _, row in data_frame.iterrows():
-        with Dataset(
-            os.path.join(fpath_nodev, row.files_nodev)
-        ) as file_dev_notpresent, Dataset(
-            os.path.join(fpath_dev, row.files_dev)
-        ) as file_dev_present:
-            gridtype, xvar, yvar, uvar, vvar = check_grid_define_vars(file_dev_present)
-
-            if first_run:
-                tmp = file_dev_notpresent.variables[uvar][:].data
-                if gridtype == "structured":
-                    mag_nodev = np.zeros((data_frame.shape[0], *tmp.shape))
-                    mag_dev = np.zeros((data_frame.shape[0], *tmp.shape))
-                else:
-                    mag_nodev = np.zeros((data_frame.shape[0], tmp.shape[0], tmp.shape[1]))
-                    mag_dev = np.zeros((data_frame.shape[0], tmp.shape[0], tmp.shape[1]))
-                xcor = file_dev_notpresent.variables[xvar][:].data
-                ycor = file_dev_notpresent.variables[yvar][:].data
-                first_run = False
-
-            u = file_dev_notpresent.variables[uvar][:].data
-            v = file_dev_notpresent.variables[vvar][:].data
-            mag_nodev[ir, :] = np.sqrt(u**2 + v**2)
-            u = file_dev_present.variables[uvar][:].data
-            v = file_dev_present.variables[vvar][:].data
-            mag_dev[ir, :] = np.sqrt(u**2 + v**2)
-            ir += 1
+    # Compute magnitudes for 'no device' and 'with device' runs
+    mag_nodev, mag_dev = compute_all_magnitudes(
+        data_frame,
+        fpath_nodev,
+        fpath_dev,
+        uvar,
+        vvar
+    )
 
     return gridtype, xcor, ycor, mag_nodev, mag_dev, data_frame
+
+
 
 def load_and_sort_files(fpath_nodev: str, fpath_dev: str) -> Tuple[
     List[str],
