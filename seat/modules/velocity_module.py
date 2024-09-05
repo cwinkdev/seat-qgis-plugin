@@ -157,7 +157,9 @@ def check_grid_define_vars(dataset: Dataset) -> tuple[str, str, str, str, str]:
 
 
 # Single File Processing
-def validate_and_list_files(fpath_nodev: str, fpath_dev: str) -> Tuple[List[str], List[str]]:
+def validate_and_list_files(
+    fpath_nodev: str, fpath_dev: str
+) -> Tuple[List[str], List[str]]:
     """
     Validate the directories and list NetCDF files in them.
 
@@ -185,16 +187,16 @@ def validate_and_list_files(fpath_nodev: str, fpath_dev: str) -> Tuple[List[str]
 
     return files_nodev, files_dev
 
+
 def process_single_file_case(
-        files_nodev: List[str],
-        files_dev: List[str],
-        fpath_nodev: str,
-        fpath_dev: str) -> Tuple[
-            str,
-            NDArray[np.float64],
-            NDArray[np.float64],
-            NDArray[np.float64],
-            NDArray[np.float64]]:
+    files_nodev: List[str], files_dev: List[str], fpath_nodev: str, fpath_dev: str
+) -> Tuple[
+    str,
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+]:
     """
     Process the single file case for both 'no device' and 'with device' runs.
 
@@ -222,14 +224,11 @@ def process_single_file_case(
     mag_dev : np.ndarray
         Magnitude data array for 'with device' runs.
     """
+
     # Helper function to read variables and compute magnitudes
     def read_and_compute_magnitude(
-            file_path: str,
-            file_name: str,
-            xvar: str,
-            yvar: str,
-            uvar: str,
-            vvar: str):
+        file_path: str, file_name: str, xvar: str, yvar: str, uvar: str, vvar: str
+    ):
         with Dataset(os.path.join(file_path, file_name)) as dataset:
             xcor = dataset.variables[xvar][:].data
             ycor = dataset.variables[yvar][:].data
@@ -243,18 +242,14 @@ def process_single_file_case(
         gridtype, xvar, yvar, uvar, vvar = check_grid_define_vars(file_dev_present)
 
     # Read and compute magnitudes for 'with device' and 'no device' runs
-    _, _, mag_dev = read_and_compute_magnitude(fpath_dev, files_dev[0], xvar, yvar, uvar, vvar)
+    _, _, mag_dev = read_and_compute_magnitude(
+        fpath_dev, files_dev[0], xvar, yvar, uvar, vvar
+    )
     xcor, ycor, mag_nodev = read_and_compute_magnitude(
-        fpath_nodev,
-        files_nodev[0],
-        xvar,
-        yvar,
-        uvar,
-        vvar
-        )
+        fpath_nodev, files_nodev[0], xvar, yvar, uvar, vvar
+    )
 
     return gridtype, xcor, ycor, mag_nodev, mag_dev
-
 
 
 # Multiple File Processing
@@ -275,27 +270,33 @@ def prepare_run_data(files_nodev: List[str], files_dev: List[str]) -> pd.DataFra
         DataFrame containing sorted file and run information.
     """
     # Extract run numbers from file names
-    run_num_nodev = np.array([int(file.split(".")[0].split("_")[-2]) for file in files_nodev])
-    run_num_dev = np.array([int(file.split(".")[0].split("_")[-2]) for file in files_dev])
+    run_num_nodev = np.array(
+        [int(file.split(".")[0].split("_")[-2]) for file in files_nodev]
+    )
+    run_num_dev = np.array(
+        [int(file.split(".")[0].split("_")[-2]) for file in files_dev]
+    )
 
     # Adjust file order if necessary
     if np.any(run_num_nodev != run_num_dev):
-        files_dev = [files_dev[np.flatnonzero(run_num_dev == ri)[0]] for ri in run_num_nodev]
+        files_dev = [
+            files_dev[np.flatnonzero(run_num_dev == ri)[0]] for ri in run_num_nodev
+        ]
 
     # Create DataFrame with sorted runs
-    return pd.DataFrame({
-        "files_nodev": files_nodev,
-        "run_num_nodev": run_num_nodev,
-        "files_dev": files_dev,
-        "run_num_dev": run_num_dev,
-    }).sort_values(by="run_num_dev")
+    return pd.DataFrame(
+        {
+            "files_nodev": files_nodev,
+            "run_num_nodev": run_num_nodev,
+            "files_dev": files_dev,
+            "run_num_dev": run_num_dev,
+        }
+    ).sort_values(by="run_num_dev")
+
 
 def compute_all_magnitudes(
-        data_frame: pd.DataFrame,
-        fpath_nodev: str,
-        fpath_dev: str,
-        uvar: str,
-        vvar: str) -> Tuple[np.ndarray, np.ndarray]:
+    data_frame: pd.DataFrame, fpath_nodev: str, fpath_dev: str, uvar: str, vvar: str
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     Compute magnitudes for 'no device' and 'with device' runs.
 
@@ -319,6 +320,7 @@ def compute_all_magnitudes(
     mag_dev : np.ndarray
         Magnitude data array for 'with device' runs.
     """
+
     def compute_magnitudes(file_path: str, file_name: str) -> np.ndarray:
         with Dataset(os.path.join(file_path, file_name)) as dataset:
             u = dataset.variables[uvar][:].data
@@ -327,25 +329,31 @@ def compute_all_magnitudes(
 
     # Compute magnitudes for each run
     mag_nodev = np.array(
-        [compute_magnitudes(fpath_nodev, row.files_nodev) for _, row in data_frame.iterrows()]
-        )
+        [
+            compute_magnitudes(fpath_nodev, row.files_nodev)
+            for _, row in data_frame.iterrows()
+        ]
+    )
     mag_dev = np.array(
-        [compute_magnitudes(fpath_dev, row.files_dev) for _, row in data_frame.iterrows()]
-        )
+        [
+            compute_magnitudes(fpath_dev, row.files_dev)
+            for _, row in data_frame.iterrows()
+        ]
+    )
 
     return mag_nodev, mag_dev
 
+
 def process_multiple_files_case(
-        files_nodev: List[str],
-        files_dev: List[str],
-        fpath_nodev: str,
-        fpath_dev: str) -> Tuple[
-            str,
-            NDArray[np.float64],
-            NDArray[np.float64],
-            NDArray[np.float64],
-            NDArray[np.float64],
-            pd.DataFrame]:
+    files_nodev: List[str], files_dev: List[str], fpath_nodev: str, fpath_dev: str
+) -> Tuple[
+    str,
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+    pd.DataFrame,
+]:
     """
     Process the multiple files case for both 'no device' and 'with device' runs.
 
@@ -379,22 +387,17 @@ def process_multiple_files_case(
     data_frame = prepare_run_data(files_nodev, files_dev)
 
     # Read the first file to define grid type and coordinates
-    with Dataset(os.path.join(fpath_dev, data_frame['files_dev'].iloc[0])) as dataset:
+    with Dataset(os.path.join(fpath_dev, data_frame["files_dev"].iloc[0])) as dataset:
         gridtype, xvar, yvar, uvar, vvar = check_grid_define_vars(dataset)
         xcor = dataset.variables[xvar][:].data
         ycor = dataset.variables[yvar][:].data
 
     # Compute magnitudes for 'no device' and 'with device' runs
     mag_nodev, mag_dev = compute_all_magnitudes(
-        data_frame,
-        fpath_nodev,
-        fpath_dev,
-        uvar,
-        vvar
+        data_frame, fpath_nodev, fpath_dev, uvar, vvar
     )
 
     return gridtype, xcor, ycor, mag_nodev, mag_dev, data_frame
-
 
 
 def load_and_sort_files(fpath_nodev: str, fpath_dev: str) -> Tuple[
@@ -405,7 +408,7 @@ def load_and_sort_files(fpath_nodev: str, fpath_dev: str) -> Tuple[
     NDArray[np.float64],
     NDArray[np.float64],
     NDArray[np.float64],
-    Optional[pd.DataFrame]
+    Optional[pd.DataFrame],
 ]:
     """
     Load and sort NetCDF files for 'no device' and 'with device' runs and process their data.
@@ -440,8 +443,8 @@ def load_and_sort_files(fpath_nodev: str, fpath_dev: str) -> Tuple[
         )
         data_frame = None  # No DataFrame needed for a single file case
     elif len(files_nodev) == len(files_dev):
-        gridtype, xcor, ycor, mag_nodev, mag_dev, data_frame = process_multiple_files_case(
-            files_nodev, files_dev, fpath_nodev, fpath_dev
+        gridtype, xcor, ycor, mag_nodev, mag_dev, data_frame = (
+            process_multiple_files_case(files_nodev, files_dev, fpath_nodev, fpath_dev)
         )
     else:
         raise ValueError(
@@ -451,10 +454,10 @@ def load_and_sort_files(fpath_nodev: str, fpath_dev: str) -> Tuple[
 
     return gridtype, xcor, ycor, mag_nodev, mag_dev, data_frame
 
+
 def load_or_calculate_probabilities(
-        probabilities_file: str,
-        mag_dev_shape: Tuple[int],
-        data_frame: pd.DataFrame) -> pd.DataFrame:
+    probabilities_file: str, mag_dev_shape: Tuple[int], data_frame: pd.DataFrame
+) -> pd.DataFrame:
     """
     Load probabilities from a CSV file or calculate them based on the number of runs.
 
@@ -484,7 +487,10 @@ def load_or_calculate_probabilities(
         # Exclude rows based on the 'Exclude' column
         if "Exclude" in bc_probability.columns:
             bc_probability = bc_probability[
-                ~((bc_probability["Exclude"] == "x") | (bc_probability["Exclude"] == "X"))
+                ~(
+                    (bc_probability["Exclude"] == "x")
+                    | (bc_probability["Exclude"] == "X")
+                )
             ]
     else:  # assume run_num in file name is return interval
         bc_probability = pd.DataFrame()
@@ -498,10 +504,12 @@ def load_or_calculate_probabilities(
 
     return bc_probability
 
+
 def apply_value_selection(
-        mag_dev: NDArray[np.float64],
-        mag_nodev: NDArray[np.float64],
-        value_selection: Optional[str]) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
+    mag_dev: NDArray[np.float64],
+    mag_nodev: NDArray[np.float64],
+    value_selection: Optional[str],
+) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
     """
     Apply a value selection method (e.g., Maximum, Mean, Final Timestep) to the magnitude arrays.
 
@@ -536,10 +544,10 @@ def apply_value_selection(
 
     return mag_dev, mag_nodev
 
+
 def initialize_combined_arrays(
-        gridtype: str,
-        mag_nodev: NDArray[np.float64],
-        mag_dev: NDArray[np.float64]) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
+    gridtype: str, mag_nodev: NDArray[np.float64], mag_dev: NDArray[np.float64]
+) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
     """
     Initialize combined arrays for magnitude data based on grid type.
 
@@ -617,14 +625,9 @@ def calculate_velocity_stressors(
     gridtype : str
         Grid type ('structured' or 'unstructured').
     """
-    (
-    gridtype,
-    xcor,
-    ycor,
-    mag_nodev,
-    mag_dev,
-    data_frame
-    ) = load_and_sort_files(fpath_nodev, fpath_dev)
+    (gridtype, xcor, ycor, mag_nodev, mag_dev, data_frame) = load_and_sort_files(
+        fpath_nodev, fpath_dev
+    )
 
     # Ensure data_frame is handled properly
     if data_frame is None:
@@ -635,7 +638,9 @@ def calculate_velocity_stressors(
             # at least for some runs the boundary has 0 coordinates. Check and fix.
             xcor, ycor, mag_nodev, mag_dev = trim_zeros(xcor, ycor, mag_nodev, mag_dev)
 
-    bc_probability = load_or_calculate_probabilities(probabilities_file, mag_dev.shape, data_frame)
+    bc_probability = load_or_calculate_probabilities(
+        probabilities_file, mag_dev.shape, data_frame
+    )
 
     # ensure velocity is depth averaged for structured array [run_num, time, layer, x, y]
     #  and drop dimension
@@ -645,10 +650,9 @@ def calculate_velocity_stressors(
 
     (mag_dev, mag_nodev) = apply_value_selection(mag_dev, mag_nodev, value_selection)
 
-    (
-        mag_combined_nodev,
-        mag_combined_dev
-    ) = initialize_combined_arrays(gridtype, mag_nodev, mag_dev)
+    (mag_combined_nodev, mag_combined_dev) = initialize_combined_arrays(
+        gridtype, mag_nodev, mag_dev
+    )
 
     for run_number, prob in zip(
         bc_probability["run_num"].values, bc_probability["probability"].values
