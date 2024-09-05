@@ -1,8 +1,6 @@
 #!/usr/bin/python
 
-# pylint: disable=too-many-statements
 # pylint: disable=too-many-arguments
-# pylint: disable=too-many-locals
 # pylint: disable=too-many-branches
 
 """
@@ -27,7 +25,6 @@
 """
 
 import os
-
 from typing import Optional, Tuple, List, Dict
 import numpy as np
 from numpy.typing import NDArray
@@ -159,6 +156,355 @@ def check_grid_define_vars(dataset: Dataset) -> tuple[str, str, str, str, str]:
     return gridtype, xvar, yvar, uvar, vvar
 
 
+
+def validate_and_list_files(fpath_nodev: str, fpath_dev: str) -> Tuple[List[str], List[str]]:
+    """
+    Validate the directories and list NetCDF files in them.
+
+    Parameters
+    ----------
+    fpath_nodev : str
+        Directory path to the baseline/no device model run NetCDF files.
+    fpath_dev : str
+        Directory path to the with device model run NetCDF files.
+
+    Returns
+    -------
+    files_nodev : list
+        List of filenames for the 'no device' runs.
+    files_dev : list
+        List of filenames for the 'with device' runs.
+    """
+    if not os.path.exists(fpath_nodev):
+        raise FileNotFoundError(f"The directory {fpath_nodev} does not exist.")
+    if not os.path.exists(fpath_dev):
+        raise FileNotFoundError(f"The directory {fpath_dev} does not exist.")
+
+    files_nodev = [i for i in os.listdir(fpath_nodev) if i.endswith(".nc")]
+    files_dev = [i for i in os.listdir(fpath_dev) if i.endswith(".nc")]
+
+    return files_nodev, files_dev
+
+def process_single_file_case(
+        files_nodev: List[str],
+        files_dev: List[str],
+        fpath_nodev: str,
+        fpath_dev: str) -> Tuple[
+            str,
+            NDArray[np.float64],
+            NDArray[np.float64],
+            NDArray[np.float64],
+            NDArray[np.float64]]:
+    """
+    Process the single file case for both 'no device' and 'with device' runs.
+
+    Parameters
+    ----------
+    files_nodev : list
+        List of filenames for the 'no device' runs.
+    files_dev : list
+        List of filenames for the 'with device' runs.
+    fpath_nodev : str
+        Directory path to the baseline/no device model run NetCDF files.
+    fpath_dev : str
+        Directory path to the with device model run NetCDF files.
+
+    Returns
+    -------
+    gridtype : str
+        Grid type ('structured' or 'unstructured').
+    xcor : np.ndarray
+        X-coordinates array.
+    ycor : np.ndarray
+        Y-coordinates array.
+    mag_nodev : np.ndarray
+        Magnitude data array for 'no device' runs.
+    mag_dev : np.ndarray
+        Magnitude data array for 'with device' runs.
+    """
+    with Dataset(
+        os.path.join(fpath_dev, files_dev[0])
+    ) as file_dev_present, Dataset(
+        os.path.join(fpath_nodev, files_nodev[0])
+    ) as file_dev_notpresent:
+        gridtype, xvar, yvar, uvar, vvar = check_grid_define_vars(file_dev_present)
+        xcor = file_dev_present.variables[xvar][:].data
+        ycor = file_dev_present.variables[yvar][:].data
+        u = file_dev_present.variables[uvar][:].data
+        v = file_dev_present.variables[vvar][:].data
+        mag_dev = np.sqrt(u**2 + v**2)
+
+        u = file_dev_notpresent.variables[uvar][:].data
+        v = file_dev_notpresent.variables[vvar][:].data
+        mag_nodev = np.sqrt(u**2 + v**2)
+
+    return gridtype, xcor, ycor, mag_nodev, mag_dev
+
+def process_multiple_files_case(
+        files_nodev: List[str],
+        files_dev: List[str],
+        fpath_nodev: str,
+        fpath_dev: str) -> Tuple[
+            str,
+            NDArray[np.float64],
+            NDArray[np.float64],
+            NDArray[np.float64],
+            NDArray[np.float64],
+            pd.DataFrame]:
+    """
+    Process the multiple files case for both 'no device' and 'with device' runs.
+
+    Parameters
+    ----------
+    files_nodev : list
+        List of filenames for the 'no device' runs.
+    files_dev : list
+        List of filenames for the 'with device' runs.
+    fpath_nodev : str
+        Directory path to the baseline/no device model run NetCDF files.
+    fpath_dev : str
+        Directory path to the with device model run NetCDF files.
+
+    Returns
+    -------
+    gridtype : str
+        Grid type ('structured' or 'unstructured').
+    xcor : np.ndarray
+        X-coordinates array.
+    ycor : np.ndarray
+        Y-coordinates array.
+    mag_nodev : np.ndarray
+        Magnitude data array for 'no device' runs.
+    mag_dev : np.ndarray
+        Magnitude data array for 'with device' runs.
+    data_frame : pd.DataFrame
+        DataFrame containing file and run information.
+    """
+    run_num_nodev = np.array([int(file.split(".")[0].split("_")[-2]) for file in files_nodev])
+    run_num_dev = np.array([int(file.split(".")[0].split("_")[-2]) for file in files_dev])
+
+    # Ensure the run order for nodev matches dev files
+    if np.any(run_num_nodev != run_num_dev):
+        adjust_dev_order = [np.flatnonzero(run_num_dev == ri)[0] for ri in run_num_nodev]
+        files_dev = [files_dev[i] for i in adjust_dev_order]
+
+    data_frame = pd.DataFrame({
+        "files_nodev": files_nodev,
+        "run_num_nodev": run_num_nodev,
+        "files_dev": files_dev,
+        "run_num_dev": run_num_dev,
+    }).sort_values(by="run_num_dev")
+
+    # Initialize variables to None
+    mag_nodev = None
+    mag_dev = None
+    xcor = None
+    ycor = None
+
+    first_run = True
+    ir = 0
+    for _, row in data_frame.iterrows():
+        with Dataset(
+            os.path.join(fpath_nodev, row.files_nodev)
+        ) as file_dev_notpresent, Dataset(
+            os.path.join(fpath_dev, row.files_dev)
+        ) as file_dev_present:
+            gridtype, xvar, yvar, uvar, vvar = check_grid_define_vars(file_dev_present)
+
+            if first_run:
+                tmp = file_dev_notpresent.variables[uvar][:].data
+                if gridtype == "structured":
+                    mag_nodev = np.zeros((data_frame.shape[0], *tmp.shape))
+                    mag_dev = np.zeros((data_frame.shape[0], *tmp.shape))
+                else:
+                    mag_nodev = np.zeros((data_frame.shape[0], tmp.shape[0], tmp.shape[1]))
+                    mag_dev = np.zeros((data_frame.shape[0], tmp.shape[0], tmp.shape[1]))
+                xcor = file_dev_notpresent.variables[xvar][:].data
+                ycor = file_dev_notpresent.variables[yvar][:].data
+                first_run = False
+
+            u = file_dev_notpresent.variables[uvar][:].data
+            v = file_dev_notpresent.variables[vvar][:].data
+            mag_nodev[ir, :] = np.sqrt(u**2 + v**2)
+            u = file_dev_present.variables[uvar][:].data
+            v = file_dev_present.variables[vvar][:].data
+            mag_dev[ir, :] = np.sqrt(u**2 + v**2)
+            ir += 1
+
+    return gridtype, xcor, ycor, mag_nodev, mag_dev, data_frame
+
+def load_and_sort_files(fpath_nodev: str, fpath_dev: str) -> Tuple[
+    List[str],
+    List[str],
+    str,
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+    Optional[pd.DataFrame]
+]:
+    """
+    Load and sort NetCDF files for 'no device' and 'with device' runs and process their data.
+
+    Parameters
+    ----------
+    fpath_nodev : str
+        Directory path to the baseline/no device model run NetCDF files.
+    fpath_dev : str
+        Directory path to the with device model run NetCDF files.
+
+    Returns
+    -------
+    gridtype : str
+        Grid type ('structured' or 'unstructured').
+    xcor : np.ndarray
+        X-coordinates array.
+    ycor : np.ndarray
+        Y-coordinates array.
+    mag_nodev : np.ndarray
+        Magnitude data array for 'no device' runs.
+    mag_dev : np.ndarray
+        Magnitude data array for 'with device' runs.
+    data_frame : pd.DataFrame or None
+        DataFrame containing file and run information if multiple files are found, otherwise None.
+    """
+    files_nodev, files_dev = validate_and_list_files(fpath_nodev, fpath_dev)
+
+    if len(files_nodev) == 1 and len(files_dev) == 1:
+        gridtype, xcor, ycor, mag_nodev, mag_dev = process_single_file_case(
+            files_nodev, files_dev, fpath_nodev, fpath_dev
+        )
+        data_frame = None  # No DataFrame needed for a single file case
+    elif len(files_nodev) == len(files_dev):
+        gridtype, xcor, ycor, mag_nodev, mag_dev, data_frame = process_multiple_files_case(
+            files_nodev, files_dev, fpath_nodev, fpath_dev
+        )
+    else:
+        raise ValueError(
+            f"Number of device runs ({len(files_dev)}) must be the same as no device runs "
+            f"({len(files_nodev)})."
+        )
+
+    return gridtype, xcor, ycor, mag_nodev, mag_dev, data_frame
+
+def load_or_calculate_probabilities(
+        probabilities_file: str,
+        mag_dev_shape: Tuple[int],
+        data_frame: pd.DataFrame) -> pd.DataFrame:
+    """
+    Load probabilities from a CSV file or calculate them based on the number of runs.
+
+    Parameters
+    ----------
+    probabilities_file : str
+        File path to probabilities/boundary condition *.csv file.
+    mag_dev_shape : Tuple[int]
+        Shape of the magnitude data array for 'with device' runs.
+    data_frame : pd.DataFrame
+        Data frame containing run information.
+
+    Returns
+    -------
+    bc_probability : pd.DataFrame
+        DataFrame containing run numbers and their corresponding probabilities.
+    """
+    if probabilities_file != "":
+        if not os.path.exists(probabilities_file):
+            raise FileNotFoundError(f"The file {probabilities_file} does not exist.")
+        # Load BC file with probabilities and find appropriate probability
+        bc_probability = pd.read_csv(probabilities_file, delimiter=",")
+        bc_probability["run_num"] = bc_probability["run number"] - 1
+        bc_probability = bc_probability.sort_values(by="run number")
+        bc_probability["probability"] = bc_probability["% of yr"].values / 100
+
+        # Exclude rows based on the 'Exclude' column
+        if "Exclude" in bc_probability.columns:
+            bc_probability = bc_probability[
+                ~((bc_probability["Exclude"] == "x") | (bc_probability["Exclude"] == "X"))
+            ]
+    else:  # assume run_num in file name is return interval
+        bc_probability = pd.DataFrame()
+        # Generate sequential run numbers from zero
+        bc_probability["run_num"] = np.arange(0, mag_dev_shape[0])
+        # Calculate probabilities assuming run_num in name is the return interval
+        bc_probability["probability"] = 1 / data_frame.run_num_dev.to_numpy()
+        bc_probability["probability"] = (
+            bc_probability["probability"] / bc_probability["probability"].sum()
+        )  # rescale to ensure total sum is 1
+
+    return bc_probability
+
+def apply_value_selection(
+        mag_dev: NDArray[np.float64],
+        mag_nodev: NDArray[np.float64],
+        value_selection: Optional[str]) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """
+    Apply a value selection method (e.g., Maximum, Mean, Final Timestep) to the magnitude arrays.
+
+    Parameters
+    ----------
+    mag_dev : np.ndarray
+        Magnitude data array for 'with device' runs.
+    mag_nodev : np.ndarray
+        Magnitude data array for 'no device' runs.
+    value_selection : str or None
+        Value selection method. Options: 'Maximum', 'Mean', 'Final Timestep', or None.
+
+    Returns
+    -------
+    mag_dev : np.ndarray
+        Processed magnitude data array for 'with device' runs.
+    mag_nodev : np.ndarray
+        Processed magnitude data array for 'no device' runs.
+    """
+    if value_selection == "Maximum":
+        mag_dev = np.nanmax(mag_dev, axis=1)  # max over time
+        mag_nodev = np.nanmax(mag_nodev, axis=1)  # max over time
+    elif value_selection == "Mean":
+        mag_dev = np.nanmean(mag_dev, axis=1)  # mean over time
+        mag_nodev = np.nanmean(mag_nodev, axis=1)  # mean over time
+    elif value_selection == "Final Timestep":
+        mag_dev = mag_dev[:, -1, :]  # last time step
+        mag_nodev = mag_nodev[:, -1, :]  # last time step
+    else:
+        mag_dev = np.nanmax(mag_dev, axis=1)  # default to max over time
+        mag_nodev = np.nanmax(mag_nodev, axis=1)  # default to max over time
+
+    return mag_dev, mag_nodev
+
+def initialize_combined_arrays(
+        gridtype: str,
+        mag_nodev: NDArray[np.float64],
+        mag_dev: NDArray[np.float64]) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """
+    Initialize combined arrays for magnitude data based on grid type.
+
+    Parameters
+    ----------
+    gridtype : str
+        Grid type ('structured' or 'unstructured').
+    mag_nodev : np.ndarray
+        Magnitude data array for 'no device' runs.
+    mag_dev : np.ndarray
+        Magnitude data array for 'with device' runs.
+
+    Returns
+    -------
+    mag_combined_nodev : np.ndarray
+        Initialized combined magnitude array for 'no device' runs.
+    mag_combined_dev : np.ndarray
+        Initialized combined magnitude array for 'with device' runs.
+    """
+    if gridtype == "structured":
+        mag_combined_nodev = np.zeros(np.shape(mag_nodev[0, :, :]))
+        mag_combined_dev = np.zeros(np.shape(mag_dev[0, :, :]))
+    else:
+        mag_combined_nodev = np.zeros(np.shape(mag_nodev)[-1])
+        mag_combined_dev = np.zeros(np.shape(mag_dev)[-1])
+
+    return mag_combined_nodev, mag_combined_dev
+
+
 def calculate_velocity_stressors(
     fpath_nodev: str,
     fpath_dev: str,
@@ -175,198 +521,57 @@ def calculate_velocity_stressors(
     str,
 ]:
     """
-
+    Calculate velocity stressors based on 'no device' and 'with device' runs.
 
     Parameters
     ----------
     fpath_nodev : str
-        Directory path to the baseline/no device model run netcdf files.
+        Directory path to the baseline/no device model run NetCDF files.
     fpath_dev : str
-        Directory path to the with device model run netcdf files.
+        Directory path to the with device model run NetCDF files.
     probabilities_file : str
-        File path to probabilities/bondary condition *.csv file.
+        File path to probabilities/boundary condition *.csv file.
     receptor_filename : str, optional
-        File path to the recetptor file (*.csv or *.tif). The default is None.
-    latlon : Bool, optional
-        True is coordinates are lat/lon. The default is True.
+        File path to the receptor file (*.csv or *.tif). Default is None.
+    latlon : bool, optional
+        True if coordinates are lat/lon. Default is True.
     value_selection : str, optional
-        Temporal selection of shears stress (not currently used). The default is 'MAX'.
-
-    Raises
-    ------
-    Exception
-        "Number of device runs files must be the same as no device runs files".
+        Temporal selection of shear stress (not currently used). Default is None.
 
     Returns
     -------
-    listOfFiles : list
-        2D arrays of:
-            [0] mag_diff
-            [1] motility_nodev
-            [2] motility_dev
-            [3] motility_diff
-            [4] motility_classification
-            [5] receptor (vel_crit)
-    rx : array
-        X-Coordiantes.
-    ry : array
-        Y-Coordinates.
-    dx : scalar
-        x-spacing.
-    dy : scalar
-        y-spacing.
+    dict_of_arrays : dict
+        Dictionary containing arrays of velocity magnitudes, motility, and classifications.
+    rx : np.ndarray
+        X-coordinates array.
+    ry : np.ndarray
+        Y-coordinates array.
+    dx : float
+        X-spacing.
+    dy : float
+        Y-spacing.
     gridtype : str
-        grid type [structured or unstructured].
-
+        Grid type ('structured' or 'unstructured').
     """
-    if not os.path.exists(fpath_nodev):
-        raise FileNotFoundError(f"The directory {fpath_nodev} does not exist.")
-    if not os.path.exists(fpath_dev):
-        raise FileNotFoundError(f"The directory {fpath_dev} does not exist.")
+    (
+    gridtype,
+    xcor,
+    ycor,
+    mag_nodev,
+    mag_dev,
+    data_frame
+    ) = load_and_sort_files(fpath_nodev, fpath_dev)
 
-    files_nodev = [i for i in os.listdir(fpath_nodev) if i.endswith(".nc")]
-    files_dev = [i for i in os.listdir(fpath_dev) if i.endswith(".nc")]
-
-    xcor = None
-    ycor = None
-
-    # Load and sort files
-    if len(files_nodev) == 1 & len(files_dev) == 1:
-        # asumes a concatonated files with shape
-        # [run_num, time, rows, cols]
-        with Dataset(
-            os.path.join(fpath_dev, files_dev[0])
-        ) as file_dev_present, Dataset(
-            os.path.join(fpath_nodev, files_nodev[0])
-        ) as file_dev_notpresent:
-            gridtype, xvar, yvar, uvar, vvar = check_grid_define_vars(file_dev_present)
-            xcor = file_dev_present.variables[xvar][:].data
-            ycor = file_dev_present.variables[yvar][:].data
-            u = file_dev_present.variables[uvar][:].data
-            v = file_dev_present.variables[vvar][:].data
-            mag_dev = np.sqrt(u**2 + v**2)
-
-            u = file_dev_notpresent.variables[uvar][:].data
-            v = file_dev_notpresent.variables[vvar][:].data
-            mag_nodev = np.sqrt(u**2 + v**2)
-
-    # same number of files, file name must be formatted with either run number or return interval
-    elif len(files_nodev) == len(files_dev):
-        # asumes each run is separate with the some_name_RunNum_map.nc,
-        # where run number comes at the last underscore before _map.nc
-        run_num_nodev = np.zeros((len(files_nodev)))
-        for ic, file in enumerate(files_nodev):
-            run_num_nodev[ic] = int(file.split(".")[0].split("_")[-2])
-        run_num_dev = np.zeros((len(files_dev)))
-        for ic, file in enumerate(files_dev):
-            run_num_dev[ic] = int(file.split(".")[0].split("_")[-2])
-
-        # ensure run oder for nodev matches dev files
-        if np.any(run_num_nodev != run_num_dev):
-            adjust_dev_order = []
-            for ri in run_num_nodev:
-                adjust_dev_order = np.append(
-                    adjust_dev_order, np.flatnonzero(run_num_dev == ri)
-                )
-            files_dev = [files_dev[int(i)] for i in adjust_dev_order]
-            run_num_dev = [run_num_dev[int(i)] for i in adjust_dev_order]
-        data_frame = pd.DataFrame(
-            {
-                "files_nodev": files_nodev,
-                "run_num_nodev": run_num_nodev,
-                "files_dev": files_dev,
-                "run_num_dev": run_num_dev,
-            }
-        )
-        data_frame = data_frame.sort_values(by="run_num_dev")
-
-        first_run = True
-        ir = 0
-        for _, row in data_frame.iterrows():
-            with Dataset(
-                os.path.join(fpath_nodev, row.files_nodev)
-            ) as file_dev_notpresent, Dataset(
-                os.path.join(fpath_dev, row.files_dev)
-            ) as file_dev_present:
-                gridtype, xvar, yvar, uvar, vvar = check_grid_define_vars(
-                    file_dev_present
-                )
-
-                if first_run:
-                    tmp = file_dev_notpresent.variables[uvar][:].data
-                    if gridtype == "structured":
-                        mag_nodev = np.zeros(
-                            (
-                                data_frame.shape[0],
-                                tmp.shape[0],
-                                tmp.shape[1],
-                                tmp.shape[2],
-                                tmp.shape[3],
-                            )
-                        )
-                        mag_dev = np.zeros(
-                            (
-                                data_frame.shape[0],
-                                tmp.shape[0],
-                                tmp.shape[1],
-                                tmp.shape[2],
-                                tmp.shape,
-                            )
-                        )
-                    else:
-                        mag_nodev = np.zeros(
-                            (data_frame.shape[0], tmp.shape[0], tmp.shape[1])
-                        )
-                        mag_dev = np.zeros(
-                            (data_frame.shape[0], tmp.shape[0], tmp.shape[1])
-                        )
-                    xcor = file_dev_notpresent.variables[xvar][:].data
-                    ycor = file_dev_notpresent.variables[yvar][:].data
-                    first_run = False
-                u = file_dev_notpresent.variables[uvar][:].data
-                v = file_dev_notpresent.variables[vvar][:].data
-                mag_nodev[ir, :] = np.sqrt(u**2 + v**2)
-                u = file_dev_present.variables[uvar][:].data
-                v = file_dev_present.variables[vvar][:].data
-                mag_dev[ir, :] = np.sqrt(u**2 + v**2)
-                ir += 1
-    else:
-        raise ValueError(
-            f"Number of device runs ({len(files_dev)}) must be the same \
-              as no device runs ({len(files_nodev)})."
-        )
-    # Finished loading and sorting files
+    # Ensure data_frame is handled properly
+    if data_frame is None:
+        pass
 
     if gridtype == "structured":
         if (xcor[0, 0] == 0) & (xcor[-1, 0] == 0):
             # at least for some runs the boundary has 0 coordinates. Check and fix.
             xcor, ycor, mag_nodev, mag_dev = trim_zeros(xcor, ycor, mag_nodev, mag_dev)
 
-    if probabilities_file != "":
-        if not os.path.exists(probabilities_file):
-            raise FileNotFoundError(f"The file {probabilities_file} does not exist.")
-        # Load BC file with probabilities and find appropriate probability
-        bc_probability = pd.read_csv(probabilities_file, delimiter=",")
-        bc_probability["run_num"] = bc_probability["run number"] - 1
-        bc_probability = bc_probability.sort_values(by="run number")
-        bc_probability["probability"] = bc_probability["% of yr"].values / 100
-        # bc_probability
-        if "Exclude" in bc_probability.columns:
-            bc_probability = bc_probability[
-                ~(
-                    (bc_probability["Exclude"] == "x")
-                    | (bc_probability["Exclude"] == "X")
-                )
-            ]
-    else:  # assume run_num in file name is return interval
-        bc_probability = pd.DataFrame()
-        # ignor number and start sequentially from zero
-        bc_probability["run_num"] = np.arange(0, mag_dev.shape[0])
-        # assumes run_num in name is the return interval
-        bc_probability["probability"] = 1 / data_frame.run_num_dev.to_numpy()
-        bc_probability["probability"] = (
-            bc_probability["probability"] / bc_probability["probability"].sum()
-        )  # rescale to ensure = 1
+    bc_probability = load_or_calculate_probabilities(probabilities_file, mag_dev.shape, data_frame)
 
     # ensure velocity is depth averaged for structured array [run_num, time, layer, x, y]
     #  and drop dimension
@@ -374,27 +579,12 @@ def calculate_velocity_stressors(
         mag_dev = np.nanmean(mag_dev, axis=2)
         mag_nodev = np.nanmean(mag_nodev, axis=2)
 
-    # Calculate Stressor and Receptors
-    if value_selection == "Maximum":
-        mag_dev = np.nanmax(mag_dev, axis=1)  # max over time
-        mag_nodev = np.nanmax(mag_nodev, axis=1)  # max over time
-    elif value_selection == "Mean":
-        mag_dev = np.nanmean(mag_dev, axis=1)  # mean over time
-        mag_nodev = np.nanmean(mag_nodev, axis=1)  # mean over time
-    elif value_selection == "Final Timestep":
-        mag_dev = mag_dev[:, -1, :]  # last time step
-        mag_nodev = mag_nodev[:, -1, :]  # last time step
-    else:
-        mag_dev = np.nanmax(mag_dev, axis=1)  # default to max over time
-        mag_nodev = np.nanmax(mag_nodev, axis=1)  # default to max over time
+    (mag_dev, mag_nodev) = apply_value_selection(mag_dev, mag_nodev, value_selection)
 
-    # initialize arrays
-    if gridtype == "structured":
-        mag_combined_nodev = np.zeros(np.shape(mag_nodev[0, :, :]))
-        mag_combined_dev = np.zeros(np.shape(mag_dev[0, :, :]))
-    else:
-        mag_combined_nodev = np.zeros(np.shape(mag_nodev)[-1])
-        mag_combined_dev = np.zeros(np.shape(mag_dev)[-1])
+    (
+        mag_combined_nodev,
+        mag_combined_dev
+    ) = initialize_combined_arrays(gridtype, mag_nodev, mag_dev)
 
     for run_number, prob in zip(
         bc_probability["run_num"].values, bc_probability["probability"].values
