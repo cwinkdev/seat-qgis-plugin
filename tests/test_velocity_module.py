@@ -8,6 +8,7 @@ from os.path import join
 import shutil
 from osgeo import gdal
 
+
 # Get the directory in which the current script is located
 script_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -17,14 +18,22 @@ sys.path.insert(0, parent_dir)
 
 # fmt: off
 from seat.modules import velocity_module as vm
-
+from seat.modules.velocity_module import (
+    GridProcessor,
+    FileProcessor,
+    VelocityStressorCalculator
+    )
 # fmt: on
+grid_processor = GridProcessor()
+file_processor = FileProcessor()
+vel_stress_calc = VelocityStressorCalculator()
 
 
 class BaseTestVelocityModule(unittest.TestCase):
     """
     Base test class that sets up the file paths needed for the velocity module tests.
     """
+
     @classmethod
     def setUpClass(cls):
         """
@@ -34,13 +43,19 @@ class BaseTestVelocityModule(unittest.TestCase):
         # Define paths with script_dir prepended
         cls.dev_present = join(script_dir, "data/structured/devices-present")
         cls.dev_not_present = join(script_dir, "data/structured/devices-not-present")
-        cls.probabilities_structured = join(script_dir, "data/structured/probabilities/hydrodynamic_probabilities.csv")
-        cls.receptor_structured = join(script_dir, "data/structured/receptor/velocity_receptor.csv")
+        cls.probabilities_structured = join(
+            script_dir, "data/structured/probabilities/hydrodynamic_probabilities.csv"
+        )
+        cls.receptor_structured = join(
+            script_dir, "data/structured/receptor/velocity_receptor.csv"
+        )
 
         # unstructured test cases
         cls.mec_present = join(script_dir, "data/unstructured/mec-present")
         cls.mec_not_present = join(script_dir, "data/unstructured/mec-not-present")
-        cls.receptor_unstructured = join(script_dir, "data/unstructured/receptor/velocity_receptor.csv")
+        cls.receptor_unstructured = join(
+            script_dir, "data/unstructured/receptor/velocity_receptor.csv"
+        )
 
 
 class TestClassifyMotility(BaseTestVelocityModule):
@@ -79,37 +94,42 @@ class TestClassifyMotility(BaseTestVelocityModule):
                 "motility_dev": np.array([1.0, 1.0]),
                 "motility_nodev": np.array([1.0, 1.0]),
                 "expected": np.array([0, 0]),
-            }
+            },
         ]
 
         # Run through each test case
         for case in test_cases:
             with self.subTest(case=case["name"]):
                 # Call the classify_motility function
-                result = vm.classify_motility(case["motility_dev"], case["motility_nodev"])
+                result = vel_stress_calc.classify_motility(
+                    case["motility_dev"], case["motility_nodev"]
+                )
 
                 # Assert that the result matches the expected classification
-                np.testing.assert_array_equal(result, case["expected"],
-                                              err_msg=f"Failed on case: {case['name']}")
+                np.testing.assert_array_equal(
+                    result, case["expected"], err_msg=f"Failed on case: {case['name']}"
+                )
+
 
 class TestCheckGridDefineVars(BaseTestVelocityModule):
     """
     Test class for the check_grid_define_vars function in the velocity module.
     """
+
     def test_structured_grid_with_coordinates(self):
         """
         Test the check_grid_define_vars function with a structured grid dataset
         that has coordinate information from a real .nc file.
         """
         # Load a real structured .nc file from the dataset
-        nc_file_path = join(self.dev_present, 'downsampled_devices_present_data.nc')
+        nc_file_path = join(self.dev_present, "downsampled_devices_present_data.nc")
 
         with netCDF4.Dataset(nc_file_path, "r") as dataset:
             # Call the function using the actual dataset
-            result = vm.check_grid_define_vars(dataset)
+            result = grid_processor.check_grid_define_vars(dataset)
 
             # Assert the expected values based on the actual data in the file
-            expected = ('structured', 'XCOR', 'YCOR', 'U1', 'V1')
+            expected = ("structured", "XCOR", "YCOR", "U1", "V1")
 
             # Assert that the function returns the expected result
             self.assertEqual(result, expected)
@@ -120,26 +140,34 @@ class TestCheckGridDefineVars(BaseTestVelocityModule):
         where the coordinates attribute is missing from the dataset.
         """
         # Load a real structured .nc file from the dataset
-        nc_file_path = join(self.dev_present, 'downsampled_devices_present_data.nc')
+        nc_file_path = join(self.dev_present, "downsampled_devices_present_data.nc")
 
         with netCDF4.Dataset(nc_file_path, "r") as dataset:
             # Simulate the absence of the coordinates attribute by removing it
             # Temporarily remove the 'coordinates' attribute from the 'U1' variable
             try:
-                original_coordinates = dataset.variables['U1'].coordinates
-                del dataset.variables['U1'].coordinates
+                original_coordinates = dataset.variables["U1"].coordinates
+                del dataset.variables["U1"].coordinates
             except AttributeError:
-                original_coordinates = None  # If the coordinates don't exist, that's fine.
+                original_coordinates = (
+                    None  # If the coordinates don't exist, that's fine.
+                )
 
             # Call the function using the modified dataset
-            result = vm.check_grid_define_vars(dataset)
+            result = grid_processor.check_grid_define_vars(dataset)
 
             # Restore the 'coordinates' attribute back after the test
             if original_coordinates is not None:
-                dataset.variables['U1'].setncattr('coordinates', original_coordinates)
+                dataset.variables["U1"].setncattr("coordinates", original_coordinates)
 
             # Assert the expected values based on the fallback
-            expected = ('structured', 'XCOR', 'YCOR', 'U1', 'V1')  # Based on the fallback logic
+            expected = (
+                "structured",
+                "XCOR",
+                "YCOR",
+                "U1",
+                "V1",
+            )  # Based on the fallback logic
 
             # Assert that the function returns the expected result
             self.assertEqual(result, expected)
@@ -149,14 +177,14 @@ class TestCheckGridDefineVars(BaseTestVelocityModule):
         Test the check_grid_define_vars function with an unstructured grid dataset.
         """
         # Load a real unstructured .nc file from the dataset
-        nc_file_path = join(self.mec_present, 'downsampled_9_tanana_1_map.nc')
+        nc_file_path = join(self.mec_present, "downsampled_9_tanana_1_map.nc")
 
         with netCDF4.Dataset(nc_file_path, "r") as dataset:
             # Call the function using the real dataset
-            result = vm.check_grid_define_vars(dataset)
+            result = grid_processor.check_grid_define_vars(dataset)
 
             # Based on the structure of the dataset, the expected values
-            expected = ('unstructured', 'FlowElem_xcc', 'FlowElem_ycc', 'ucxa', 'ucya')
+            expected = ("unstructured", "FlowElem_xcc", "FlowElem_ycc", "ucxa", "ucya")
 
             # Assert that the function returns the expected result
             self.assertEqual(result, expected)
@@ -176,36 +204,50 @@ class TestCalculateVelocityStressors(BaseTestVelocityModule):
         fpath_nodev = os.path.join(self.dev_not_present)
         fpath_dev = os.path.join(self.dev_present)
         probabilities_file = os.path.join(self.probabilities_structured)
-        receptor_structured=os.path.join(self.receptor_structured)
+        receptor_structured = os.path.join(self.receptor_structured)
 
         # Run the function with real data
-        result = vm.calculate_velocity_stressors(fpath_nodev, fpath_dev, probabilities_file,receptor_structured)
+        result = vel_stress_calc.calculate_velocity_stressors(
+            fpath_nodev, fpath_dev, probabilities_file, receptor_structured
+        )
         # Unpack the results
         dict_of_arrays, rx, ry, dx, dy, gridtype = result
 
         # Hardcoded expected values based on the printed output
-        expected_velocity_magnitude_without_devices = np.array([0.280967, 0.288835, 0.297379, 0.297637, 0.298635])
+        expected_velocity_magnitude_without_devices = np.array(
+            [0.280967, 0.288835, 0.297379, 0.297637, 0.298635]
+        )
         expected_motility_classified = np.array([2.0, 2.0, 2.0, 2.0, 2.0])
         # Take 5 data points from 'velocity_magnitude_without_devices' to compare (indices 10:15)
-        velocity_magnitude_without_devices = dict_of_arrays['velocity_magnitude_without_devices'].flatten()
+        velocity_magnitude_without_devices = dict_of_arrays[
+            "velocity_magnitude_without_devices"
+        ].flatten()
         selected_velocity_points = velocity_magnitude_without_devices[10:15]
 
         # Take 5 data points from 'motility_classified' to compare (indices 10:05)
-        motility_classified = dict_of_arrays['motility_classified'].flatten()
+        motility_classified = dict_of_arrays["motility_classified"].flatten()
         selected_motility_points = motility_classified[10:15]
-        print('smp',selected_motility_points)
-
+        print("smp", selected_motility_points)
 
         # Assert the selected points match the expected values
-        np.testing.assert_array_almost_equal(selected_velocity_points, expected_velocity_magnitude_without_devices, decimal=6,
-                                                err_msg="Velocity magnitude mismatch")
-        np.testing.assert_array_equal(selected_motility_points, expected_motility_classified,
-                                        err_msg="Motility classification mismatch")
+        np.testing.assert_array_almost_equal(
+            selected_velocity_points,
+            expected_velocity_magnitude_without_devices,
+            decimal=6,
+            err_msg="Velocity magnitude mismatch",
+        )
+        np.testing.assert_array_equal(
+            selected_motility_points,
+            expected_motility_classified,
+            err_msg="Motility classification mismatch",
+        )
 
         # Additional validations for the output structure
         self.assertIsInstance(result, tuple)
         self.assertEqual(len(result), 6)
-        self.assertEqual(gridtype, 'structured', "Expected grid type to be 'structured'")
+        self.assertEqual(
+            gridtype, "structured", "Expected grid type to be 'structured'"
+        )
 
         # Validate the dimensions of the arrays
         self.assertEqual(len(rx.shape), 2, "Expected rx to be a 2D array")
@@ -232,41 +274,58 @@ class TestCalculateVelocityStressors(BaseTestVelocityModule):
         # Define the file paths correctly for unstructured data
         fpath_nodev = os.path.join(self.mec_not_present)
         fpath_dev = os.path.join(self.mec_present)
-        probabilities_file = ''
-        receptor_unstructured=os.path.join(self.receptor_unstructured)
+        probabilities_file = ""
+        receptor_unstructured = os.path.join(self.receptor_unstructured)
 
         # Run the function with real data
-        result = vm.calculate_velocity_stressors(fpath_nodev, fpath_dev, probabilities_file, receptor_unstructured)
+        result = vel_stress_calc.calculate_velocity_stressors(
+            fpath_nodev, fpath_dev, probabilities_file, receptor_unstructured
+        )
 
         # Unpack the results
         dict_of_arrays, rx, ry, dx, dy, gridtype = result
 
         # Expected values based on the dataset analysis (filtered out NaN)
-        expected_velocity_magnitude_without_devices = np.array([0.63701 , 0.911683, 0.683935, 0.794173, 0.996996])
+        expected_velocity_magnitude_without_devices = np.array(
+            [0.63701, 0.911683, 0.683935, 0.794173, 0.996996]
+        )
         expected_motility_classified = np.array([1.0, 2.0, 1.0, 1.0, 1.0])
 
         # Filter out NaN values and -100 placeholders, then take the first 5 valid data points from the calculated result
-        velocity_magnitude_without_devices = dict_of_arrays['velocity_magnitude_without_devices'].flatten()
-        valid_velocity_magnitude = velocity_magnitude_without_devices[~np.isnan(velocity_magnitude_without_devices)]
+        velocity_magnitude_without_devices = dict_of_arrays[
+            "velocity_magnitude_without_devices"
+        ].flatten()
+        valid_velocity_magnitude = velocity_magnitude_without_devices[
+            ~np.isnan(velocity_magnitude_without_devices)
+        ]
         selected_velocity_points = valid_velocity_magnitude[:5]
 
         # Handle motility classified, filtering out -100 values
-        motility_classified = dict_of_arrays['motility_classified'].flatten()
-        valid_motility_classified = motility_classified[motility_classified != -100]  # Ignore -100 values
+        motility_classified = dict_of_arrays["motility_classified"].flatten()
+        valid_motility_classified = motility_classified[
+            motility_classified != -100
+        ]  # Ignore -100 values
         selected_motility_points = valid_motility_classified[150:155]
 
-
-
         # Assert the selected points match the expected values
-        np.testing.assert_array_almost_equal(selected_velocity_points, expected_velocity_magnitude_without_devices, decimal=6,
-                                            err_msg="Velocity magnitude mismatch")
-        np.testing.assert_array_equal(selected_motility_points, expected_motility_classified,
-                                    err_msg="Motility classification mismatch")
+        np.testing.assert_array_almost_equal(
+            selected_velocity_points,
+            expected_velocity_magnitude_without_devices,
+            decimal=6,
+            err_msg="Velocity magnitude mismatch",
+        )
+        np.testing.assert_array_equal(
+            selected_motility_points,
+            expected_motility_classified,
+            err_msg="Motility classification mismatch",
+        )
 
         # Additional validations for the output structure
         self.assertIsInstance(result, tuple)
         self.assertEqual(len(result), 6)
-        self.assertEqual(gridtype, 'unstructured', "Expected grid type to be 'unstructured'")
+        self.assertEqual(
+            gridtype, "unstructured", "Expected grid type to be 'unstructured'"
+        )
 
         # Validate the dimensions of the arrays
         self.assertEqual(len(rx.shape), 2, "Expected rx to be a 2D array")
@@ -291,6 +350,7 @@ class TestRunVelocityStressor(BaseTestVelocityModule):
     """
     Test class for the run_velocity_stressor function in the velocity module.
     """
+
     def test_run_velocity_stressor_with_basic_setup_structured(self):
         """
         Test the run_velocity_stressor function with basic setup for structured data,
@@ -308,11 +368,19 @@ class TestRunVelocityStressor(BaseTestVelocityModule):
         if not os.path.exists(output_path):
             os.makedirs(output_path)
 
-        result = vm.run_velocity_stressor(dev_present_file, dev_not_present_file, probabilities_file, crs, output_path, receptor_file, secondary_constraint_filename)
+        result = vm.run_velocity_stressor(
+            dev_present_file,
+            dev_not_present_file,
+            probabilities_file,
+            crs,
+            output_path,
+            receptor_file,
+            secondary_constraint_filename,
+        )
         self.assertIsInstance(result, dict)
 
         # Read the output raster and compare it to the expected values
-        raster_path = os.path.join(output_path, 'velocity_magnitude_difference.tif')
+        raster_path = os.path.join(output_path, "velocity_magnitude_difference.tif")
         dataset = gdal.Open(raster_path)
         band = dataset.GetRasterBand(1)
         selected_velocity_magnitude_diff = band.ReadAsArray()[10:13, 10:13]
@@ -321,14 +389,21 @@ class TestRunVelocityStressor(BaseTestVelocityModule):
         dataset = None
 
         expected_velocity_magnitude_diff = np.array(
-            [[-2.842238e-03, -1.392993e-03, -2.204220e-03],
-            [ 4.425721e-05, -4.777499e-05, -7.539215e-04],
-            [ 6.493267e-04,  1.057695e-03,  1.367250e-03]])
+            [
+                [-2.842238e-03, -1.392993e-03, -2.204220e-03],
+                [4.425721e-05, -4.777499e-05, -7.539215e-04],
+                [6.493267e-04, 1.057695e-03, 1.367250e-03],
+            ]
+        )
 
-        np.testing.assert_array_almost_equal(selected_velocity_magnitude_diff, expected_velocity_magnitude_diff, decimal=6, err_msg="Velocity magnitude difference mismatch")
+        np.testing.assert_array_almost_equal(
+            selected_velocity_magnitude_diff,
+            expected_velocity_magnitude_diff,
+            decimal=6,
+            err_msg="Velocity magnitude difference mismatch",
+        )
 
         shutil.rmtree(output_path)
-
 
     def test_run_velocity_stressor_with_basic_setup_unstructured_data(self):
         """
@@ -338,7 +413,7 @@ class TestRunVelocityStressor(BaseTestVelocityModule):
         # Use the class-level paths defined in BaseTestVelocityModule for unstructured data
         dev_present_file = self.mec_present
         dev_not_present_file = self.mec_not_present
-        probabilities_file = ''
+        probabilities_file = ""
         receptor_file = self.receptor_unstructured
         crs = 4326
         secondary_constraint_filename = None
@@ -356,14 +431,14 @@ class TestRunVelocityStressor(BaseTestVelocityModule):
             crs,
             output_path,
             receptor_file,
-            secondary_constraint_filename
+            secondary_constraint_filename,
         )
 
         # Assert the output is a dictionary
         self.assertIsInstance(result, dict)
 
         # Read the output raster and process the velocity magnitude difference
-        raster_path = os.path.join(output_path, 'velocity_magnitude_difference.tif')
+        raster_path = os.path.join(output_path, "velocity_magnitude_difference.tif")
         dataset = gdal.Open(raster_path)
         band = dataset.GetRasterBand(1)
         velocity_magnitude_diff = band.ReadAsArray()
@@ -372,7 +447,9 @@ class TestRunVelocityStressor(BaseTestVelocityModule):
         dataset = None
 
         # Remove NaN values and calculate the mean of valid data points
-        valid_velocity_magnitude_diff = velocity_magnitude_diff[~np.isnan(velocity_magnitude_diff)]
+        valid_velocity_magnitude_diff = velocity_magnitude_diff[
+            ~np.isnan(velocity_magnitude_diff)
+        ]
 
         # Calculate the mean of the valid velocity magnitude difference values
         calculated_mean_velocity_magnitude_diff = np.mean(valid_velocity_magnitude_diff)
@@ -381,10 +458,16 @@ class TestRunVelocityStressor(BaseTestVelocityModule):
         expected_mean_velocity_magnitude_diff = calculated_mean_velocity_magnitude_diff
 
         # Assert that the calculated mean is close to the expected mean
-        np.testing.assert_almost_equal(calculated_mean_velocity_magnitude_diff, expected_mean_velocity_magnitude_diff, decimal=6, err_msg="Velocity magnitude difference mean mismatch")
+        np.testing.assert_almost_equal(
+            calculated_mean_velocity_magnitude_diff,
+            expected_mean_velocity_magnitude_diff,
+            decimal=6,
+            err_msg="Velocity magnitude difference mean mismatch",
+        )
 
         # Clean up the generated output files after the test
         shutil.rmtree(output_path)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
