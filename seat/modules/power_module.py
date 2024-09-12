@@ -1,7 +1,6 @@
 # power_module.py
 
-# pylint: disable=too-many-arguments
-
+# pylint: disable=too-many-lines
 
 """
 This module provides functionalities related to power calculations.
@@ -88,6 +87,35 @@ class DevicePowerData:
 
 
 class ObstacleData:
+    """
+    This class provides methods for handling obstacle data related to power device configuration.
+    It includes methods for reading obstacle polygon files, calculating centroids, plotting obstacle
+    locations, pairing devices based on centroids, and extracting device location data.
+
+    Methods
+    -------
+    read_obstacle_polygon_file(power_device_configuration_file: str) ->
+    Dict[str, NDArray[np.float64]]:
+        Reads an obstacle polygon file and returns the xy coordinates of each obstacle.
+
+    find_mean_point_of_obstacle_polygon(obstacles: Dict[str, NDArray[np.float64]]) ->
+    NDArray[np.float64]:
+        Calculates the centroid of each obstacle.
+
+    plot_test_obstacle_locations(obstacles: Dict[str, NDArray[np.float64]]) -> Figure:
+        Creates a plot of the spatial distribution and location of each obstacle.
+
+    pair_devices(centroids: NDArray[np.float64]) -> NDArray[np.int32]:
+        Determines the two intersecting obstacles that create a device
+        by finding the closest centroid pairs.
+
+    extract_device_location(
+    obstacles: Dict[str, NDArray[np.float64]], device_index: List[List[int]]
+    ) -> DataFrame:
+        Creates a dictionary summary of each device location based
+        on obstacle data and device indices.
+    """
+
     @staticmethod
     def read_obstacle_polygon_file(
         power_device_configuration_file: str,
@@ -286,6 +314,34 @@ class ObstacleData:
 
 
 class PowerFileData:
+    """
+    This class provides methods for handling power files related to power device calculations.
+    It includes methods for reading power files, processing power files, sorting data files,
+    and resetting data order.
+
+    Methods
+    -------
+    read_power_file(datafile: str) -> Tuple[NDArray[np.float64], float]:
+        Reads a power file and extracts the final set of converged data.
+
+    read_and_process_power_files(
+    power_files: str, bc_data: DataFrame
+    ) -> Tuple[List[str], NDArray[np.float64], NDArray[np.float64]]:
+        Reads and processes multiple power files, returning sorted data file paths,
+        power values, and total power values.
+
+    sort_data_files_by_runnumber(bc_data: DataFrame, datafiles: List[str]) -> List[str]:
+        Sorts the power data files based on the run number specified
+        in the hydrodynamic probabilities data.
+
+    sort_bc_data_by_runnumber(bc_data: DataFrame) -> DataFrame:
+        Sorts the hydrodynamic probabilities DataFrame by the 'run number' column.
+
+    reset_bc_data_order(bc_data: DataFrame) -> Union[DataFrame, None]:
+        Resets the order of the hydrodynamic probabilities DataFrame to its
+        original order if 'original_order' column exists.
+    """
+
     @staticmethod
     def read_power_file(datafile: str) -> Tuple[NDArray[np.float64], float]:
         """
@@ -309,7 +365,8 @@ class PowerFileData:
             for line in inf:  # iterate through each line
                 if re.match("Iteration:", line):
                     power_array = []
-                    # If a new iteration is found, initalize varialbe or overwrite existing iteration
+                    # If a new iteration is found, initalize varialbe
+                    # or overwrite existing iteration
                 else:  # data
                     # extract float variable from line
                     power = float(line.split("=")[-1].split("W")[0].strip())
@@ -400,7 +457,8 @@ class PowerFileData:
     @staticmethod
     def reset_bc_data_order(bc_data: DataFrame) -> Union[DataFrame, None]:
         """
-        Resets the order of `bc_data` DataFrame to its original order if 'original_order' column exists.
+        Resets the order of `bc_data` DataFrame to its original order
+        if 'original_order' column exists.
 
         Parameters
         ----------
@@ -418,6 +476,45 @@ class PowerFileData:
 
 
 class PowerPlotter:
+    """
+    This class provides methods for plotting power data related to power devices.
+    It includes methods for plotting and saving power summaries, creating power heatmaps,
+    preparing device power plots, plotting device power scenarios, and
+    processing and plotting device power.
+
+    Methods
+    -------
+    plot_and_save_power_summaries(
+    total_power_scaled: NDArray[np.float64],
+    power_scaled: NDArray[np.float64],
+    datafiles: List[str], save_path: str
+    ) -> None:
+        Plots and saves power summary figures for total scaled power, power per run obstacle,
+        and total power for all obstacles.
+
+    create_power_heatmap(device_power: DataFrame, crs: Optional[int] = None) -> Figure:
+        Creates a heatmap of device locations with power values as color.
+
+    prepare_device_power_plot(devices: pd.DataFrame) -> DevicePowerPlotData:
+        Prepares the plot for device power data by creating subplots and calculating axis limits.
+
+    plot_device_power_scenario(
+    device_power_data: DevicePowerData, save_path: str, ic: int, col: str
+    ) ->
+    Tuple[DevicePowerData, str]:
+        Plots the power data for a specific scenario and saves the plot to the specified path.
+
+    process_and_plot_device_power(
+    device_power_data: DevicePowerData,
+    save_path: str,
+    obstacles: Dict[str, np.ndarray],
+    device_index: np.ndarray,
+    crs: Optional[int] = None
+    ) -> Tuple[DevicePowerData, str]:
+        Processes device power data to compute total annual power per device,
+        generates plots, and creates a heatmap of device power.
+    """
+
     @staticmethod
     def plot_and_save_power_summaries(
         total_power_scaled: NDArray[np.float64],
@@ -541,11 +638,11 @@ class PowerPlotter:
             device_power["Power [W]"].max() * 1e-6,
         )
         for _, device in device_power.iterrows():
-            # # use https://stackoverflow.com/questions/10550477/how-do-i-set-color-to-rectangle-in-matplotlib
-            # # to create rectangles from the polygons above
-            # # scale color based on power device power range from 0 to max of array
-            # # This way the plot is array and grid independent, only based on centroid and device size,
-            # could make size variable if necessary.
+# # use https://stackoverflow.com/questions/10550477/how-do-i-set-color-to-rectangle-in-matplotlib
+# # to create rectangles from the polygons above
+# # scale color based on power device power range from 0 to max of array
+# # This way the plot is array and grid independent, only based on centroid and device size,
+# could make size variable if necessary.
             ax.add_patch(
                 Rectangle(
                     (device.lower_left[0] + adjust_x, device.lower_left[1]),
@@ -745,6 +842,34 @@ class PowerPlotter:
 
 
 class PowerCalculatorTools:
+    """
+    This class provides utility methods for calculating and processing power data for power devices.
+    It includes methods for calculating and saving device power, processing device configurations,
+    rounding up values, and determining closest centroid pairs.
+
+    Methods
+    -------
+    calculate_and_save_device_power(
+    power_array: np.ndarray,
+    device_index: np.ndarray,
+    bc_data: pd.DataFrame,
+    datafiles: List[str],
+    save_path: str
+    ) -> DevicePowerData:
+        Calculates the power per device based on the power array and device index,
+        saves the device power data to a CSV file, and prepares for plotting.
+
+    process_device_configuration(power_files: str, save_path: str) ->
+    Tuple[np.ndarray, Dict[str, NDArray[np.float64]]]:
+        Processes device configuration by reading obstacle polygon files, calculating centroids,
+        pairing devices, and saving the configuration and plots.
+
+    roundup(x: float, val: int = 2) -> float:
+        Rounds up the number `x` to the nearest multiple of `val`.
+
+    centroid_diffs(centroids: NDArray[np.float64], centroid: NDArray[np.float64]) -> List[int]:
+        Determines the closest centroid pair based on the distances between centroids.
+    """
 
     @staticmethod
     def calculate_and_save_device_power(
@@ -821,7 +946,8 @@ class PowerCalculatorTools:
         Tuple[np.ndarray, Dict[str, NDArray[np.float64]]]
             A tuple containing:
             - device_index: An array representing paired device indices.
-            - obstacles: A dictionary where keys are obstacle names and values are their xy coordinates.
+            - obstacles: A dictionary where keys are obstacle names and
+              values are their xy coordinates.
         """
         # Find all .pol files in the power_files directory
         power_device_configuration_file = [
